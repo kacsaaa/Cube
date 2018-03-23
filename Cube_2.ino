@@ -6,9 +6,17 @@ float acc_x, acc_y, acc_z, acc_total_vector;
 int temperature;
 float gyro_x_offset, gyro_y_offset, gyro_z_offset;
 long loop_timer;
-float angle_x, angle_y;
+float angle_x, angle_y, angle_z;
 float angle_x_acc, angle_z_acc;
+float angle_x_calc;
 int subtimer;
+enum Pos {
+	Up,
+	Down,
+	Left,
+	Right
+};
+Pos pos;
 #define offset_timer 1000
 #define frequency 200.0f
 
@@ -21,6 +29,7 @@ void setup() {
 	gyro_x_offset = 0;
 	gyro_z_offset = 0;
 	subtimer = 0;
+	angle_x_calc = 0;
 
 	for (int i = 0; i < offset_timer; i++) {								//Offset mérése, majd egy erre használt változóba mentése
 		read_data_mpu_6050();                                            
@@ -33,6 +42,11 @@ void setup() {
 	angle_x_acc = asin((float)acc_y / acc_total_vector)* RAD_TO_DEG;
 	angle_x = angle_x_acc;													//Kiindulási értékek beállítása
 	
+	//angle_z_acc = asin((float)acc_x / acc_total_vector)* -57.296;
+	//angle_z = angle_z_acc;
+
+	pos = Down;
+
 	loop_timer = micros();													//Innentõl mérem egy ciklus idejét, hogy az integrálás megfelelõ legyen
 }
 
@@ -43,22 +57,45 @@ void loop() {
 	gyro_x -= gyro_x_offset;												//Offset-tel kalibrálok                                         
 	gyro_z -= gyro_z_offset;                                               
 	
-	angle_x -= gyro_x/frequency/65.5f;										//Hogy fokot kapjak 65.5-tel kell elosztanom a kiolvasott értéket, illetve még 250-nel,
+	angle_x -= gyro_x / frequency / 65.5f;									//Hogy fokot kapjak 65.5-tel kell elosztanom a kiolvasott értéket, illetve még frequency-vel,
 																			//hogy a két kiolvasás közti szögelfordulást kapjam meg.
+	//angle_z -= gyro_y / frequency / 65.5f;
+	
 	acc_total_vector = sqrt((acc_x*acc_x) + (acc_y*acc_y) + (acc_z*acc_z));
 	angle_x_acc = asin((float)acc_y / acc_total_vector)* RAD_TO_DEG;
-	angle_x -= angle_y * sin((gyro_z/frequency/65.5f)*DEG_TO_RAD);			//A z irányú elfordulás következtében létrejövõ hibát kalibrálom
-	angle_y += angle_x * sin((gyro_z/frequency/65.5f)*DEG_TO_RAD);
-																
-	angle_x = angle_x * 0.9991 + angle_x_acc * 0.0009;						//Giroszkóp drift-jének kompenzálása agyorsulásmérõ és giroszkóp súlyozott összegével
-	
-	Serial.print(angle_x);
+	//angle_x -= angle_z * sin((gyro_z/frequency/65.5f)*DEG_TO_RAD);			//A z irányú elfordulás következtében létrejövõ hibát kalibrálom
+	//angle_z += angle_x * sin((gyro_z/frequency/65.5f)*DEG_TO_RAD);
+
+	angle_x = angle_x * 0.93 + angle_x_acc * 0.07;							//Giroszkóp drift-jének kompenzálása agyorsulásmérõ és giroszkóp súlyozott összegével
+
+	if ((acc_z > 0 && acc_y > 0) || (acc_z > 0 && acc_y < 0)) {
+		angle_x_calc = 180 - angle_x;
+	}
+	else if (acc_z < 0 && acc_y < 0) {
+		angle_x_calc = 360 + angle_x;
+	}
+	else {
+		angle_x_calc = angle_x;
+	}
+	if ((angle_x_calc > 340) || (angle_x_calc < 20)) {
+		pos = Up;
+	}
+	if ((angle_x_calc > 70 && angle_x_calc < 110)) {
+		pos = Right;
+	}
+	if ((angle_x_calc > 160 && angle_x_calc < 200)) {
+		pos = Down;
+	}
+	if ((angle_x_calc > 250 && angle_x_calc < 290)) {
+		pos = Left;
+	}
+	Serial.print(angle_x_calc); Serial.print("|"); Serial.print(pos);
 	//Serial.print("|Angle_X_acc = "); Serial.print(angle_x_acc);
 	//Serial.print("|Angle_X_gyr = "); Serial.print(gyro_x / 100.0f / 65.5f);
 	//Serial.print(micros() - loop_timer);
 	Serial.println();
 
-	while (micros() - loop_timer < 1/frequency);								//Addig vár míg a számláló eléri az 5000-es (200Hz-hez tartozó) értéket
+	while (micros() - loop_timer < (1/frequency)*1000000);					//Addig vár míg a számláló eléri az 5000-es (200Hz-hez tartozó) értéket
 	loop_timer = micros();													//Resetelem a timer-t, hogy 0-ról induljon a különbség az új ciklusban
 }
 
